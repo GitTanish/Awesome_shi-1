@@ -2,6 +2,8 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_core.runnables import RunnableParallel, RunnableLambda
+from workers.tools import agent_tools
+from langchain_core.utils.function_calling import convert_to_openai_function
 
 # ==========================================
 # CONFIGURATION
@@ -142,3 +144,29 @@ def reflective_coding_chain(request: str):
             })
             
     return code
+
+# ==========================================
+# CHAPTER 5: TOOL USE (The Autonomous Agent)
+# ==========================================
+
+# 1. Bind tools to the model
+# This tells Llama 3: "You have these functions available. Use them if needed."
+llm_with_tools = llm_smart.bind_tools(agent_tools)
+
+# 2. The Tool-Aware Prompt
+tool_prompt = ChatPromptTemplate.from_template(
+    """
+    You are an Autonomous Developer. 
+    You have access to the file system.
+    
+    Goal: {request}
+    
+    If you need to write code, use the 'save_file' tool to save it to disk.
+    Do not just print the code. SAVE IT.
+    """
+)
+
+# 3. The Chain
+# Notice: We REMOVED StrOutputParser(). 
+# We need the raw output because it might contain a "Tool Call" (JSON), not just string text.
+autonomous_dev_chain = tool_prompt | llm_with_tools
