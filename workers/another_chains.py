@@ -161,8 +161,12 @@ tool_prompt = ChatPromptTemplate.from_template(
     
     Goal: {request}
     
-    If you need to write code, use the 'save_file' tool to save it to disk.
-    Do not just print the code. SAVE IT.
+    Rules:
+    1. WRITE the code.
+    2. SAVE it to a file using 'save_file'.
+    3. EXECUTE the file using 'execute_python_file' to verify it works.
+    
+    If execution fails, analyze the error and fix the code.
     """
 )
 
