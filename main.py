@@ -3,6 +3,9 @@ import json
 from dotenv import load_dotenv
 
 load_dotenv()
+import sys
+# Force UTF-8 encoding for Windows consoles to support emojis like 🚀
+sys.stdout.reconfigure(encoding='utf-8')
 
 from core.models import RouteIntent
 from core.router import router_chain
@@ -46,7 +49,7 @@ def execute_tool_calls(ai_message):
     return "\\n".join(results)
 
 def run_app():
-    print("🚀 Groq-Powered Agent (v0.3 - Autonomous Tools) Online")
+    print("🚀 Groq-Powered Agent (v0.4 - Self-Healing) Online")
     print("Type 'exit' to quit.\n")
     
     while True:
@@ -61,18 +64,55 @@ def run_app():
             except ValueError:
                 intent = RouteIntent.CASUAL
 
-            print(f"Intent: {intent.value}")
+            print(f"🚦 Intent: {intent.value}")
 
             # 2. EXECUTION (Swapped to new chains)
             if intent == RouteIntent.CODE:
-                # NEW: Check if the user specifically asked to SAVE a file
+                # CHECK FOR AUTONOMOUS MODE
                 if "save" in user_input.lower() or "file" in user_input.lower():
-                    print("🤖 Mode: Autonomous Developer (Tool Use)")
-                    response_msg = autonomous_dev_chain.invoke({"request": user_input})
-                    result = execute_tool_calls(response_msg)
-                    print(f"\\n✅ Final Result: {result}")
+                    print("🤖 Mode: Autonomous Developer (Self-Healing)")
+                    
+                    # --- THE SELF-HEALING LOOP ---
+                    current_request = user_input
+                    max_retries = 3
+                    
+                    for attempt in range(max_retries):
+                        print(f"   🔄 Iteration {attempt + 1}/{max_retries}...")
+                        
+                        # A. Ask the Brain
+                        ai_msg = autonomous_dev_chain.invoke({"request": current_request})
+                        
+                        # B. Check for Tool Calls
+                        if not ai_msg.tool_calls:
+                            print("   ℹ️  Agent finished (no more tools needed).")
+                            print(f"\nFinal Reply: {ai_msg.content}")
+                            break
+                        
+                        # C. Execute Tools (The Hands)
+                        tool_output = execute_tool_calls(ai_msg)
+                        
+                        # D. The "Eye": Check if it worked
+                        if "❌ Execution Error" in tool_output:
+                            print(f"   ⚠️ Runtime Error detected!")
+                            # KEY TRICK: We update the request to force a fix
+                            current_request = (
+                                f"The previous code failed with this error:\\n{tool_output}\\n"
+                                f"Original Goal: {user_input}\\n"
+                                f"Please FIX the code, SAVE it again, and RUN it."
+                            )
+                        elif "✅ Execution Success" in tool_output:
+                            print(f"\\n✅ Task Completed Successfully:\\n{tool_output}")
+                            break
+                        else:
+                            # If it just saved but didn't run, we assume success or let it continue
+                            print(f"   ↳ Output: {tool_output}")
+                    
+                    else:
+                        print("❌ Max retries reached. I couldn't fix the bug.")
+                    # -----------------------------
+
                 else:
-                    print("Engaging Reflective Coder (Loop)...")
+                    print("⚡ Mode: Reflective Coder (No File I/O)")
                     result = reflective_coding_chain(user_input)
                     print(f"\\nFinal Code:\\n{result}")
 
