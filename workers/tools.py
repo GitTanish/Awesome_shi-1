@@ -13,16 +13,15 @@ def save_file(filename: str, content: str):
     try:
         # Simple security sandbox: specific folder for agent outputs
         OUTPUT_DIR = "agent_workspace"
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
         
         file_path = os.path.join(OUTPUT_DIR, filename)
-        
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(content)
             
-        return f"✅ File successfully saved to: {file_path}"
+        return f"File successfully saved to: {file_path}"
     except Exception as e:
-        return f"❌ Error saving file: {str(e)}"
+        return f"Error saving file: {str(e)}"
 
 @tool
 def read_file(filename: str):
@@ -54,10 +53,12 @@ def execute_python_file(filename: str):
         if not os.path.exists(file_path):
             return "Error: File does not exist. Save it first."
             
+        script_dir = os.path.dirname(file_path)
         # Security: Run with a timeout so infinite loops don't freeze your agent
         # capture_output=True grabs what would have printed to the terminal
         result = subprocess.run(
-            ["python", file_path], 
+            ["python", os.path.basename(file_path)], 
+            cwd=script_dir,
             capture_output=True, 
             text=True, 
             timeout=10
