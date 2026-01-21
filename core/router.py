@@ -1,30 +1,49 @@
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from core.models import RouteIntent
 
-# fast brain
-# temp =0 because, classification must be deterministic
-llm_router = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
+# 1. configuration
+# if llama 3.1 disappears, you only change this one line.
+llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
 
-# sys prompt
-system_prompt = f"""
-You are a precise classifier. 
-Classify the user input into EXACTLY one of these categories:
-{RouteIntent.list_options()}
-
-Rules:
-1. If the user asks for code, functions, or implementation -> Return '{RouteIntent.CODE.value}'
-2. If the user asks for explanation, history, or how-to -> Return '{RouteIntent.RESEARCH.value}'
-3. For greetings or other chatter -> Return '{RouteIntent.CASUAL.value}'
-
-OUTPUT ONLY THE CATEGORY NAME. NO OTHER TEXT.
-"""
-# Prompt template
+# 2. the robust system-human structure
+# we DO NOT import RouteIntent. we explicitly state the contract here.
+# this ensures this file is self-contained.
 route_prompt = ChatPromptTemplate.from_messages([
-    ("system", system_prompt),
+    ("system", """
+    You are a precise classification system.
+    Classify the user input into EXACTLY one of these categories:
+    
+    1. CODE
+    - Writing scripts, debugging, "save this", "build a project".
+    
+    2. RESEARCH
+    - Explaining concepts, "how does X work", searching web.
+    
+    3. CASUAL
+    - Greetings, small talk, "hi".
+    
+    Return ONLY the category name. No punctuation.
+    """),
     ("human", "{input}")
 ])
 
-# The chain (prompt -> llm -> string parser)
-router_chain = route_prompt | llm_router | StrOutputParser()
+# 3. the chain (with the safety adapter)
+# THE ADAPTER (The "Engineering Solution")
+def parse_intent(text):
+    # 1. Normalize: "  Code. " -> "CODE."
+    text = text.strip().upper()
+    
+    # 2. Match: Look for the signal in the noise
+    if "CODE" in text: return "CODE"
+    if "RESEARCH" in text: return "RESEARCH"
+    
+    # 3. Fallback: If unsure, be safe
+    return "CASUAL"
+
+router_chain = (
+    route_prompt 
+    | llm 
+    | StrOutputParser() 
+    | parse_intent # <--- Applies the logic above automatically
+)

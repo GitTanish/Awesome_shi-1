@@ -123,19 +123,28 @@ planner_chain = planner_prompt | llm_fast | JsonOutputParser()
 # 2. THE BUILDER (Tool User)
 llm_with_tools = llm_smart.bind_tools(agent_tools)
 
+# ... (imports and other chains remain the same) ...
+
+# 2. THE BUILDER (Tool User)
+# Ensure you are using the Smart Model (70b) for this!
+# If you are using 8b here, CHANGE IT to 70b-versatile or similar.
+llm_with_tools = llm_smart.bind_tools(agent_tools)
+
 tool_prompt = ChatPromptTemplate.from_template(
     """
     You are an Autonomous Developer.
     Goal: {request}
 
     Rules:
-    1. Write the code.
-    2. SAVE it to a file using 'save_file'.
-    3. Execute the file using 'execute_python_file' to verify it works.
-
-    If execution fails, analyze the error and fix the code.
+    1. If you need to write code, use 'save_file' then 'execute_python_file'.
+    2. If the code crashes, ANALYZE the error.
+    3. If the error implies a missing library or unknown method, use 'web_search'.
+    4. FIX the code and retry.
+    
+    Do NOT output XML or Markdown for tool calls. Just call the function directly.
     """
 )
+
 autonomous_dev_chain = tool_prompt | llm_with_tools
 
 # For Chapter 2 compatibility (Research routing fallback)
