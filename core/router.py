@@ -2,48 +2,34 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-# 1. configuration
-# if llama 3.1 disappears, you only change this one line.
 llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
 
-# 2. the robust system-human structure
-# we DO NOT import RouteIntent. we explicitly state the contract here.
-# this ensures this file is self-contained.
 route_prompt = ChatPromptTemplate.from_messages([
     ("system", """
-    You are a precise classification system.
-    Classify the user input into EXACTLY one of these categories:
+    You are a classifier. Determine the user's intent.
     
-    1. CODE
-    - Writing scripts, debugging, "save this", "build a project".
+    Categories:
+    1. CODE: Writing scripts, fixing bugs, running code, saving files, or building projects.
+    2. RESEARCH: Pure information gathering, explaining concepts, or summarizing history.
+    3. CASUAL: Greetings and small talk.
     
-    2. RESEARCH
-    - Explaining concepts, "how does X work", searching web.
+    CRITICAL RULE: If the user asks to write code, run a script, or fix an error, the intent is ALWAYS 'CODE', even if they also mention "searching" or "researching" libraries.
     
-    3. CASUAL
-    - Greetings, small talk, "hi".
-    
-    Return ONLY the category name. No punctuation.
+    Return ONLY one word: CODE, RESEARCH, or CASUAL.
     """),
     ("human", "{input}")
 ])
 
-# 3. the chain (with the safety adapter)
-# THE ADAPTER (The "Engineering Solution")
+# The Adapter Function (Keeps it safe)
 def parse_intent(text):
-    # 1. Normalize: "  Code. " -> "CODE."
     text = text.strip().upper()
-    
-    # 2. Match: Look for the signal in the noise
     if "CODE" in text: return "CODE"
     if "RESEARCH" in text: return "RESEARCH"
-    
-    # 3. Fallback: If unsure, be safe
     return "CASUAL"
 
 router_chain = (
     route_prompt 
     | llm 
     | StrOutputParser() 
-    | parse_intent # <--- Applies the logic above automatically
+    | parse_intent 
 )

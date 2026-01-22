@@ -2,29 +2,20 @@ import os
 import subprocess
 from langchain_core.tools import tool
 from langchain_community.tools import DuckDuckGoSearchRun
-from langchain_core.pydantic_v1 import BaseModel, Field # <--- NEW IMPORT
 
 # Initialize Search Engine
 search_engine = DuckDuckGoSearchRun()
 
-# --- INPUT SCHEMAS (The Safety Molds) ---
-class FileInput(BaseModel):
-    filename: str = Field(description="Name of the file (e.g., 'script.py')")
-    content: str = Field(description="Code or text to write to the file")
+# --- TOOLS (Docstring-Driven / No Pydantic Dependencies) ---
 
-class ReadInput(BaseModel):
-    filename: str = Field(description="Name of the file to read")
-
-class SearchInput(BaseModel):
-    query: str = Field(description="The search query to run on DuckDuckGo")
-
-# --- TOOLS ---
-
-@tool("save_file", args_schema=FileInput) # <--- Bind the Schema
+@tool
 def save_file(filename: str, content: str):
     """
-    Saves content to a file in 'agent_workspace'. 
-    Overwrites if exists. 
+    Saves content to a file in the agent_workspace directory.
+    
+    Args:
+        filename: The name of the file (e.g., 'script.py').
+        content: The actual code or text to write.
     """
     try:
         OUTPUT_DIR = "agent_workspace"
@@ -36,9 +27,14 @@ def save_file(filename: str, content: str):
     except Exception as e:
         return f"Error saving file: {str(e)}"
 
-@tool("read_file", args_schema=ReadInput)
+@tool
 def read_file(filename: str):
-    """Reads a file from 'agent_workspace'."""
+    """
+    Reads the content of a file from the agent_workspace.
+    
+    Args:
+        filename: The name of the file to read.
+    """
     try:
         OUTPUT_DIR = "agent_workspace"
         file_path = os.path.join(OUTPUT_DIR, filename)
@@ -49,11 +45,13 @@ def read_file(filename: str):
     except Exception as e:
         return f"Error reading file: {str(e)}"
 
-@tool("execute_python_file", args_schema=ReadInput) # Re-use ReadInput since it just needs filename
+@tool
 def execute_python_file(filename: str):
     """
-    Runs a Python script inside 'agent_workspace'.
-    Returns STDOUT or STDERR.
+    Runs a Python script that is already saved in the workspace.
+    
+    Args:
+        filename: The name of the script to run (e.g., 'script.py').
     """
     try:
         OUTPUT_DIR = "agent_workspace"
@@ -62,6 +60,7 @@ def execute_python_file(filename: str):
             return "Error: File does not exist."
             
         script_dir = os.path.dirname(file_path)
+        # Timeout prevents infinite loops
         result = subprocess.run(
             ["python", os.path.basename(file_path)], 
             cwd=script_dir,
@@ -76,10 +75,13 @@ def execute_python_file(filename: str):
     except Exception as e:
         return f"System Error: {str(e)}"
 
-@tool("web_search", args_schema=SearchInput)
+@tool
 def web_search(query: str):
     """
-    Searches the internet for documentation or error fixes.
+    Searches the internet for information.
+    
+    Args:
+        query: The search term (e.g., 'python install yfinance error').
     """
     try:
         # Using invoke instead of run (Modern LangChain)
@@ -87,4 +89,5 @@ def web_search(query: str):
     except Exception as e:
         return f"Error searching: {str(e)}"
 
+# Export
 agent_tools = [save_file, read_file, execute_python_file, web_search]
