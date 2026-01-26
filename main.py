@@ -2,45 +2,35 @@ import os
 import sys
 import json
 from dotenv import load_dotenv
+from core.memory import memory
 
 load_dotenv()
 
 from core.models import RouteIntent
 from core.router import router_chain
 from workers.chains import coding_chain, planner_chain, autonomous_dev_chain
-from workers.tools import agent_tools # We still need the functions
+from workers.tools import agent_tools
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-# --- THE MANUAL PARSER ---
+# --- CONFIGURATION ---
+CODE_EXTENSIONS = {'.py', '.sh', '.bat', '.js', '.ts', '.go', '.rs'}
+DATA_EXTENSIONS = {'.txt', '.md', '.json', '.csv', '.xml', '.html', '.css', '.yaml', '.yml', '.env'}
+
 def execute_json_tool_call(json_str):
     try:
-        # 1. Clean the output (sometimes models add markdown ```json blocks)
         clean_json = json_str.replace("```json", "").replace("```", "").strip()
-        
-        # 2. Parse JSON
         tool_data = json.loads(clean_json)
         tool_name = tool_data.get("tool")
         tool_args = tool_data.get("args")
-        
-        print(f"      🛠️ Tool Call: {tool_name}") # Debug print
-        
-        # 3. Find and Run Tool
-        # We manually match the string name to the function in agent_tools
-        selected_tool = next((t for t in agent_tools if t.name == tool_name), None)
-        
-        if selected_tool:
-            return selected_tool.invoke(tool_args)
-        else:
-            return f"Error: Tool '{tool_name}' not found."
-            
+        return tool_name, tool_args
     except json.JSONDecodeError:
-        return f"Error: Agent output invalid JSON.\nRaw output: {json_str}"
-    except Exception as e:
-        return f"System Error executing tool: {e}"
+        return None, None
+    except Exception:
+        return None, None
 
 def run_app():
-    print("Groq-Powered Architect Online (Explicit Mode)")
+    print("Groq-Powered Architect Online (v4.0 - Deterministic)")
     
     while True:
         user_input = input("\n>> You: ")
@@ -49,8 +39,6 @@ def run_app():
         try:
             # 1. ROUTING
             raw_intent = router_chain.invoke({"input": user_input})
-            print(f"   🐛 DEBUG: Router returned -> '{raw_intent}'")
-            
             try:
                 intent = RouteIntent(raw_intent)
             except ValueError:
@@ -58,83 +46,84 @@ def run_app():
             
             print(f"   🚦 Intent: {intent.value}")
 
-            # 2. EXECUTION
             if intent == RouteIntent.CODE:
+                print("   🤖 Mode: Autonomous Developer")
+                current_request = user_input
                 
-                # A. PROJECT MODE (Architect)
-                if any(word in user_input.lower() for word in ["project", "build", "create app"]):
-                    print("   🏗️ Mode: The Architect")
-                    # ... (Architect logic same as before, but using execute_json_tool_call inside loop)
-                    # Let's focus on Single Task first to verify the fix.
-                    print("   (Architect mode paused for testing Single Task)")
+                # ARCHITECTURAL STATE
+                max_steps = 10  # It's an action budget, not retries
+                action_history = [] # List of (tool_name, args_str)
+                
+                for step in range(max_steps):
+                    print(f"\n   🔄 Step {step+1}/{max_steps}...")
 
-                # B. SINGLE TASK (Persistent Loop)
-                else:
-                    print("   Mode: Autonomous Developer")
-                    current_request = user_input
-                    max_retries = 5 # Give it more turns to think -> code -> run -> fix
+                    # 1. Memory Recall
+                    context = memory.search_memory(current_request)
+                    augmented_request = current_request
+                    if context:
+                        print(f"      🧠 Recalled: {str(context)[:100]}...")
+                        augmented_request += f"\n\n[MEMORY]: I found relevant past info: {context}"
                     
-                    for attempt in range(max_retries):
-                        print(f"      Iteration {attempt+1}/{max_retries}...")
-                        
-                        # 1. Ask Brain
-                        ai_response_str = autonomous_dev_chain.invoke({"request": current_request})
-                        
-                        # 2. Parse
-                        try:
-                            clean_json = ai_response_str.replace("```json", "").replace("```", "").strip()
-                            tool_data = json.loads(clean_json)
-                            tool_name = tool_data.get("tool")
-                            tool_args = tool_data.get("args") or {}
-                        except json.JSONDecodeError:
-                            print(f"      JSON Error. Retrying...")
-                            current_request += f"\nSYSTEM: Your last output was invalid JSON. Try again."
-                            continue
+                    # 2. Invoke Brain
+                    ai_response_str = autonomous_dev_chain.invoke({"request": augmented_request})
+                    
+                    # 3. Parse (But Don't Run Yet)
+                    tool_name, tool_args = execute_json_tool_call(ai_response_str)
+                    
+                    if not tool_name:
+                        print("      ⚠️ Invalid JSON from Agent. Retrying...")
+                        current_request += "\nSYSTEM: Invalid JSON. Fix format."
+                        continue
 
-                        # 3. Check for Termination
-                        if tool_name == "task_complete":
-                            print("      Task Completed.")
-                            break
-                        
-                        # 4. Execute Real Tool
-                        print(f"      Tool Call: {tool_name}")
-                        
-                        # Find the tool function
-                        selected_tool = next((t for t in agent_tools if t.name == tool_name), None)
-                        
-                        if selected_tool:
-                            tool_output = selected_tool.invoke(tool_args)
-                        else:
-                            tool_output = f"Error: Tool {tool_name} not found."
-                        
-                        # 5. FEEDBACK LOOP (The Critical Fix)
-                        # We append the result to the request so the agent knows what happened.
-                        if "Error" in tool_output or "❌" in tool_output:
-                             print(f"         Output: {tool_output[:100]}...") 
-                             current_request += f"\n\nSYSTEM: Tool '{tool_name}' failed: {tool_output}. Fix it."
-                        else:
-                             print(f"         Output: {tool_output[:100]}...")
-                             
-                             # --- SMART HINTING (The Fix) ---
-                             # We guide the agent based on what it just did.
-                             next_prompt = "What is the next step?"
-                             
-                             if tool_name == "save_file":
-                                 next_prompt = "File saved. STOP EDITING. You must now call 'execute_python_file' immediately to test the code."
-                             elif tool_name == "web_search":
-                                 # NUANCED LOGIC:
-                                 # 1. Acknowledge the search.
-                                 # 2. Remind about the pip limitation.
-                                 # 3. Suggest Standard Libs.
-                                 # 4. Allow graceful failure.
-                                 next_prompt = (
-                                     "Search complete. CRITICAL CONTEXT: You do not have access to a terminal to run 'pip install'. "
-                                     "STRATEGY: Write a Python script using STANDARD LIBRARIES (like 'urllib', 'json', 're') to fetch the data directly from a URL. "
-                                     "If this is impossible, save a file named 'report.txt' explaining why."
-                                 )
-                             
-                             current_request += f"\n\nSYSTEM: Tool '{tool_name}' succeeded. {next_prompt}"
-            
+                    # 4. PROACTIVE LOOP DETECTION (The Fix)
+                    # We serialize args to check for exact duplicates
+                    current_action_signature = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
+                    
+                    if action_history.count(current_action_signature) >= 2:
+                        print("      🔴 FATAL LOOP DETECTED. History repeats 3 times.")
+                        print("      🛑 SYSTEM FORCED TERMINATION.")
+                        memory.save_memory(f"Task: {user_input}. Status: Failed (Loop).")
+                        break
+                    
+                    action_history.append(current_action_signature)
+
+                    # 5. EXECUTE REAL TOOL
+                    print(f"      🛠️  Tool: {tool_name}")
+                    print(f"      📂 Args: {str(tool_args)[:100]}...")
+                    
+                    selected_tool = next((t for t in agent_tools if t.name == tool_name), None)
+                    if selected_tool:
+                        tool_output = selected_tool.invoke(tool_args)
+                        print(f"      ✅ Result: {str(tool_output)[:100]}...")
+                    else:
+                        tool_output = f"Error: Tool {tool_name} not found."
+
+                    # 6. DETERMINISTIC TERMINATION (The Architect's Rule)
+                    # If it's a data file, we don't ask the agent. We just end it.
+                    if tool_name == "save_file":
+                        filename = tool_args.get("filename", "")
+                        if any(filename.endswith(ext) for ext in DATA_EXTENSIONS):
+                            print(f"      🏁 DATA FILE CREATED ({filename}). TASK COMPLETE.")
+                            memory.save_memory(f"Task: {user_input}. Status: Success (Data File).")
+                            break # <--- HARD BREAK
+
+                    # 7. EXPLICIT COMPLETION
+                    if tool_name == "task_complete":
+                        print("      ✅ Task Completed.")
+                        memory.save_memory(f"Task: {user_input}. Status: Success.")
+                        break
+
+                    # 8. FEEDBACK GENERATION
+                    if "Error" in str(tool_output) or "❌" in str(tool_output):
+                         current_request += f"\n\nSYSTEM: Tool '{tool_name}' failed: {tool_output}. Fix it."
+                    else:
+                         # Smart Hinting for Code
+                         next_prompt = "What is the next step?"
+                         if tool_name == "save_file" and any(tool_args.get("filename", "").endswith(ext) for ext in CODE_EXTENSIONS):
+                             next_prompt = "Code saved. You MUST now verify it with 'execute_python_file'."
+                         
+                         current_request += f"\n\nSYSTEM: Tool '{tool_name}' succeeded. {next_prompt}"
+
             elif intent == RouteIntent.CASUAL:
                 print("   👋 I am a specialized R&D Agent.")
 
